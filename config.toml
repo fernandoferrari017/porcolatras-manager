@@ -1,0 +1,11 @@
+[theme]
+base="light"
+primaryColor="#006437"  # Verde Palmeiras
+backgroundColor="#FFFFFF" # Branco
+secondaryBackgroundColor="#E6E6E6" # Cinza claro
+textColor="#000000"
+font="sans serif"
+
+[global]
+# Desabilita a notificação de e-mail na inicialização
+showWarningOnDirectExecution = false
