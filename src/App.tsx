@@ -343,8 +343,15 @@ useEffect(() => {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    window.location.reload();
+    setActionLoading(true);
+    try {
+      await supabase.auth.signOut();
+      localStorage.clear(); // Limpa dados do celular
+      sessionStorage.clear();
+      window.location.replace('/'); // Volta para o login limpando a tela
+    } catch (error) {
+      window.location.href = '/';
+    }
   };
 
   const saveMembro = async () => {
