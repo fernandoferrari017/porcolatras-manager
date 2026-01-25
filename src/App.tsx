@@ -1,7 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from './supabaseClient';
+
 import { 
   Trophy, Settings, LogOut, Calendar, BarChart3, Edit2, 
   FileDown, Trash2, MapPin, Plus, Key, Shield, UserPlus, 
@@ -10,8 +12,12 @@ import {
   Award, Target, Zap, Clock, ShieldCheck, PieChart, Activity,
   Download, FilterX, HelpCircle, RefreshCw, UserCheck, AlertCircle
 } from 'lucide-react';
+
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+/** 👇 AGORA SIM */
+const APP_VERSION = "2026.01.21";
 
 /**
  * ==========================================================================================
@@ -62,8 +68,18 @@ const GlobalStyles = () => (
     }
   `}</style>
 );
-
 export default function App() {
+
+  useEffect(() => {
+    const storedVersion = localStorage.getItem("app_version");
+
+    if (storedVersion !== APP_VERSION) {
+      localStorage.setItem("app_version", APP_VERSION);
+      window.location.reload();
+    }
+  }, []);
+
+  // -----------------------------------
   // ---------------------------------------------------------
   // ---------------------------------------------------------
 // 1. ESTADOS DE AUTENTICAÇÃO E PERFIL
