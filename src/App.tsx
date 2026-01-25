@@ -894,7 +894,14 @@ y += 10;
 // TOTAL DE INTEGRANTES ATIVOS
 const totalIntegrantesAtivos = usuarios.length;
 
-jogos.forEach(jogo => {
+// 🔥 ORDENA JOGOS: MAIS RECENTE PRIMEIRO
+const jogosOrdenados = [...jogos].sort(
+  (a, b) =>
+    new Date(b.data_jogo).getTime() -
+    new Date(a.data_jogo).getTime()
+);
+
+jogosOrdenados.forEach(jogo => {
   if (y > 260) {
     doc.addPage();
     y = 20;
