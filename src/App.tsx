@@ -880,66 +880,94 @@ if (!user && !authLoading) return (
 
     doc.setFont("helvetica", "normal");
 
-    // =====================================================
-    // DETALHAMENTO DOS JOGOS (100% ATUALIZADO)
-    // =====================================================
-    let y = avisoY + 14;
+// =====================================================
+// DETALHAMENTO DOS JOGOS (100% ATUALIZADO)
+// =====================================================
+let y = avisoY + 14;
 
-    doc.setFontSize(16);
-    doc.setTextColor(0);
-    doc.text("DETALHAMENTO DOS JOGOS (CASA / FORA)", 14, y);
+doc.setFontSize(16);
+doc.setTextColor(0);
+doc.text("DETALHAMENTO DOS JOGOS (CASA / FORA)", 14, y);
 
-    y += 10;
+y += 10;
 
-    jogos.forEach(jogo => {
-      if (y > 260) {
-        doc.addPage();
-        y = 20;
-      }
+// TOTAL DE INTEGRANTES ATIVOS
+const totalIntegrantesAtivos = usuarios.length;
 
-      const presentesArray = presencasAtualizadas
-        .filter(p => p.jogo_id === jogo.id)
-        .map(p => {
-          const usuario = usuarios.find(u => u.id === p.usuario_id);
-          return usuario ? usuario.apelido : "Usuário removido";
-        });
+jogos.forEach(jogo => {
+  if (y > 260) {
+    doc.addPage();
+    y = 20;
+  }
 
-      const presentes =
-        presentesArray.length > 0
-          ? presentesArray.join(", ")
-          : "Nenhum participante";
+  // ================= PRESENTES NO JOGO =================
+  const presentesUsuarios = presencasAtualizadas.filter(
+    p => p.jogo_id === jogo.id
+  );
 
-      doc.setFontSize(12);
-      doc.setTextColor(21, 128, 61);
-      doc.text(
-        `PALMEIRAS x ${jogo.adversario} (${jogo.tipo_local})`,
-        14,
-        y
-      );
+  const totalPresentes = presentesUsuarios.length;
 
-      y += 6;
+  const presentesArray = presentesUsuarios.map(p => {
+    const usuario = usuarios.find(u => u.id === p.usuario_id);
+    return usuario ? usuario.apelido : "Usuário removido";
+  });
 
-      doc.setFontSize(10);
-      doc.setTextColor(80);
-      doc.text(
-        `${jogo.local} | ${formatDate(jogo.data_jogo)}`,
-        14,
-        y
-      );
+  const presentes =
+    presentesArray.length > 0
+      ? presentesArray.join(", ")
+      : "Nenhum participante";
 
-      y += 6;
+  // ================= PERCENTUAL =================
+  const percentualPresenca =
+    totalIntegrantesAtivos > 0
+      ? Math.round((totalPresentes / totalIntegrantesAtivos) * 100)
+      : 0;
 
-      doc.setFontSize(10);
-      doc.setTextColor(60);
+  // ================= TÍTULO DO JOGO =================
+  doc.setFontSize(12);
+  doc.setTextColor(21, 128, 61);
+  doc.text(
+    `PALMEIRAS x ${jogo.adversario} (${jogo.tipo_local})`,
+    14,
+    y
+  );
 
-      const textoPresentes = `Presentes: ${presentes}`;
-      const linhas = doc.splitTextToSize(textoPresentes, 180);
+  y += 6;
 
-      doc.text(linhas, 14, y);
-      y += linhas.length * 5 + 8;
-    });
+  // ================= LOCAL / DATA =================
+  doc.setFontSize(10);
+  doc.setTextColor(80);
+  doc.text(
+    `${jogo.local} | ${formatDate(jogo.data_jogo)}`,
+    14,
+    y
+  );
 
-    doc.save("ranking_porcolatras_2026_completo.pdf");
+  y += 6;
+
+  // ================= RESUMO NUMÉRICO =================
+  doc.setFontSize(10);
+  doc.setTextColor(60);
+  doc.text(
+    `Presentes: ${totalPresentes} | Ativos: ${totalIntegrantesAtivos} | Presença: ${percentualPresenca}%`,
+    14,
+    y
+  );
+
+  y += 6;
+
+  // ================= LISTA DE PRESENTES =================
+  doc.setFontSize(10);
+  doc.setTextColor(60);
+
+  const textoPresentes = `Integrantes presentes: ${presentes}`;
+  const linhas = doc.splitTextToSize(textoPresentes, 180);
+
+  doc.text(linhas, 14, y);
+  y += linhas.length * 5 + 8;
+});
+
+doc.save("ranking_porcolatras_2026_completo.pdf");
   }}
   style={{ ...ui.button(theme.primary), width: isMobile ? '100%' : 'auto' }}
 >
