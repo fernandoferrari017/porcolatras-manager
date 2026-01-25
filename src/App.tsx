@@ -113,7 +113,7 @@ useEffect(() => {
   // ---------------------------------------------------------
   // 4. ESTADOS DE RANKING PROCESSADO
   // ---------------------------------------------------------
-  const [rankingGeral, setRankingGeral] = useState<any[]>([]);
+  const [rankingAtual, setRankingAtual] = useState<any[]>([]);
   const [rankingCasa, setRankingCasa] = useState<any[]>([]);
   const [rankingFora, setRankingFora] = useState<any[]>([]);
 
@@ -268,7 +268,7 @@ useEffect(() => {
 
       // Converte mapa para array e ordena
       const finalRanking = Object.values(statsMap);
-      setRankingGeral([...finalRanking].sort((a: any, b: any) => b.total - a.total));
+      setRankingAtual([...finalRanking].sort((a: any, b: any) => b.total - a.total));
       setRankingCasa([...finalRanking].sort((a: any, b: any) => b.casa - a.casa));
       setRankingFora([...finalRanking].sort((a: any, b: any) => b.fora - a.fora));
 
@@ -733,16 +733,58 @@ if (!user && !authLoading) return (
         </div>
 
         <button
-  onClick={() => {
+  onClick={async () => {
+ // 🔥 FORÇA SINCRONIZAÇÃO NO MOBILE
+ await refreshAllData(user.id);
+    // =====================================================
+    // BUSCAR DADOS ATUALIZADOS (FONTE DA VERDADE)
+    // =====================================================
+    const [{ data: jogos }, { data: usuarios }, { data: presencasAtualizadas }] =
+      await Promise.all([
+        supabase.from('jogos').select('*'),
+        supabase.from('profiles').select('*'),
+        supabase.from('presencas').select('*').eq('status', 'APROVADO')
+      ]);
+
+    if (!jogos || !usuarios || !presencasAtualizadas) {
+      alert('Erro ao gerar relatório atualizado');
+      return;
+    }
+    const statsMap: any = {};
+
+    usuarios.forEach(u => {
+      statsMap[u.id] = {
+        id: u.id,
+        nome: u.nome,
+        apelido: u.apelido,
+        casa: 0,
+        fora: 0,
+        total: 0
+      };
+    });
+    
+    presencasAtualizadas.forEach(p => {
+      const jogo = jogos.find(j => j.id === p.jogo_id);
+      if (!jogo || !statsMap[p.usuario_id]) return;
+    
+      statsMap[p.usuario_id].total += 1;
+      if (jogo.tipo_local === 'Casa') statsMap[p.usuario_id].casa += 1;
+      if (jogo.tipo_local === 'Fora') statsMap[p.usuario_id].fora += 1;
+    });
+    
+    const rankingAtual = Object.values(statsMap).sort(
+      (a: any, b: any) => b.total - a.total
+    );
+    
     const doc = new jsPDF();
-  
+
     // =====================================================
     // CABEÇALHO
     // =====================================================
     doc.setFontSize(22);
     doc.setTextColor(21, 128, 61);
     doc.text("RANKING OFICIAL PORCOLATRAS 2026", 14, 18);
-  
+
     doc.setFontSize(11);
     doc.setTextColor(100);
     doc.text(
@@ -750,18 +792,18 @@ if (!user && !authLoading) return (
       14,
       25
     );
-  
+
     // =====================================================
     // TOP 3 - LÍDERES
     // =====================================================
     doc.setFontSize(15);
     doc.setTextColor(0);
     doc.text("TOP 3 - LÍDERES DA TEMPORADA", 14, 36);
-  
+
     autoTable(doc, {
       startY: 42,
       head: [["POSIÇÃO", "APELIDO", "NOME", "CASA", "FORA", "TOTAL"]],
-      body: rankingGeral.slice(0, 3).map((r, i) => [
+      body: rankingAtual.slice(0, 3).map((r: any, i: number) => [
         i === 0 ? "LÍDER" : i === 1 ? "VICE-LÍDER" : "3º COLOCADO",
         r.apelido,
         r.nome,
@@ -772,19 +814,19 @@ if (!user && !authLoading) return (
       headStyles: { fillColor: [21, 128, 61] },
       styles: { fontStyle: "bold" }
     });
-  
+
     // =====================================================
     // RANKING COMPLETO
     // =====================================================
     const rankingStartY = doc.lastAutoTable.finalY + 10;
-  
+
     doc.setFontSize(15);
     doc.text("RANKING GERAL COMPLETO", 14, rankingStartY);
-  
+
     autoTable(doc, {
       startY: rankingStartY + 5,
       head: [["POS", "APELIDO", "NOME", "CASA", "FORA", "TOTAL"]],
-      body: rankingGeral.map((r, i) => [
+      body: rankingAtual.map((r: any, i: number) => [
         i + 1,
         r.apelido,
         r.nome,
@@ -794,60 +836,63 @@ if (!user && !authLoading) return (
       ]),
       didParseCell(data) {
         if (data.row.section === 'body') {
-          const rowIndex = data.row.index;
-          const jogador = rankingGeral[rowIndex];
-      
+          const jogador = rankingAtual[data.row.index] as any;
           if (jogador && jogador.total < 5) {
             data.cell.styles.textColor = [220, 38, 38];
             data.cell.styles.fontStyle = "bold";
           }
         }
-      }
-      ,
+      },
       headStyles: { fillColor: [30, 41, 59] }
     });
-  
+
     // =====================================================
     // AVISO ZONA DA DEGOLA
     // =====================================================
     const avisoY = doc.lastAutoTable.finalY + 10;
-  
+
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     doc.setTextColor(220, 38, 38);
-    
+
     doc.text(
       "ATENÇÃO: OS INTEGRANTES QUE NÃO COMPLETAREM 5 JOGOS AO FINAL DA TEMPORADA, SERÃO EXCLUÍDOS DO GRUPO.",
       14,
       avisoY,
       { maxWidth: 180 }
     );
-    
+
     doc.setFont("helvetica", "normal");
-    
-  
+
     // =====================================================
-    // DETALHAMENTO DOS JOGOS (COM QUEBRA DE LINHA)
+    // DETALHAMENTO DOS JOGOS (100% ATUALIZADO)
     // =====================================================
     let y = avisoY + 14;
-  
+
     doc.setFontSize(16);
     doc.setTextColor(0);
     doc.text("DETALHAMENTO DOS JOGOS (CASA / FORA)", 14, y);
-  
-    dbJogos.forEach(jogo => {
-      y += 10;
-  
+
+    y += 10;
+
+    jogos.forEach(jogo => {
+      if (y > 260) {
+        doc.addPage();
+        y = 20;
+      }
+
+      const presentesArray = presencasAtualizadas
+        .filter(p => p.jogo_id === jogo.id)
+        .map(p => {
+          const usuario = usuarios.find(u => u.id === p.usuario_id);
+          return usuario ? usuario.apelido : "Usuário removido";
+        });
+
       const presentes =
-        dbPresencas
-          .filter(
-            p =>
-              p.jogo_id === jogo.id &&
-              p.status === "APROVADO"
-          )
-          .map(p => p.apelido)
-          .join(", ") || "Nenhum participante";
-  
+        presentesArray.length > 0
+          ? presentesArray.join(", ")
+          : "Nenhum participante";
+
       doc.setFontSize(12);
       doc.setTextColor(21, 128, 61);
       doc.text(
@@ -855,8 +900,9 @@ if (!user && !authLoading) return (
         14,
         y
       );
-  
+
       y += 6;
+
       doc.setFontSize(10);
       doc.setTextColor(80);
       doc.text(
@@ -864,30 +910,27 @@ if (!user && !authLoading) return (
         14,
         y
       );
-  
+
       y += 6;
-  
-      // QUEBRA AUTOMÁTICA DE LINHA (A PARTE CRÍTICA)
+
+      doc.setFontSize(10);
+      doc.setTextColor(60);
+
       const textoPresentes = `Presentes: ${presentes}`;
       const linhas = doc.splitTextToSize(textoPresentes, 180);
-  
+
       doc.text(linhas, 14, y);
-      y += linhas.length * 6;
-  
-      // quebra de página automática
-      if (y > 270) {
-        doc.addPage();
-        y = 20;
-      }
+      y += linhas.length * 5 + 8;
     });
-  
+
     doc.save("ranking_porcolatras_2026_completo.pdf");
   }}
-  
   style={{ ...ui.button(theme.primary), width: isMobile ? '100%' : 'auto' }}
 >
   Exportar
 </button>
+
+
 
       </div>
 
@@ -901,7 +944,7 @@ if (!user && !authLoading) return (
         }}
       >
         {[1, 0, 2].map(pos => {
-          const item = rankingGeral[pos];
+          const item = rankingAtual[pos];
           if (!item) return null;
           const isFirst = pos === 0;
 
@@ -950,7 +993,7 @@ if (!user && !authLoading) return (
         </div>
 
         {/* LISTA RANKING */}
-        {rankingGeral
+        {rankingAtual
           .filter(r =>
             r.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
             r.apelido.toLowerCase().includes(searchTerm.toLowerCase())
