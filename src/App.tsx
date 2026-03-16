@@ -117,6 +117,9 @@ useEffect(() => {
   const [historyFilter, setHistoryFilter] = useState('todos');
   const [usuarioSelecionado, setUsuarioSelecionado] = useState(null);
 
+// 🔹 NOVO: controle de exibição dos gráficos no ranking
+const [showCharts, setShowCharts] = useState(false);
+
 
   // ---------------------------------------------------------
   // 3. ESTADOS DE DADOS BRUTOS (SINCRONIZADOS COM SUPABASE)
@@ -213,7 +216,132 @@ useEffect(() => {
       letterSpacing: '0.5px'
     })
   };
+// ---------------------------------------------------------
+// COMPONENTE: BarChart (sem bibliotecas externas) — COM CLASSES PARA IMPRESSÃO
+// ---------------------------------------------------------
+const BarChart = ({
+  data = [],
+  valueKey = 'total',
+  title = 'Gráfico',
+  color = theme.primary
+}: {
+  data: any[];
+  valueKey: 'total' | 'casa' | 'fora' | string;
+  title: string;
+  color?: string;
+}) => {
+  const maxValue = Math.max(1, ...data.map(d => Number(d?.[valueKey] || 0)));
 
+  return (
+    <div className="chart-card" style={{ ...ui.card }}>
+      {/* Título + meta */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <h3 className="chart-title" style={{ margin: 0, fontWeight: 900, fontSize: 18 }}>{title}</h3>
+        <div className="chart-meta" style={ui.badge('#f1f5f9', theme.textLight)}>Máx: {maxValue}</div>
+      </div>
+
+      {/* Container das linhas (scroll na tela; sem corte na impressão) */}
+      <div
+        className="custom-scrollbar chart-scroll"
+        style={{
+          display: 'grid',
+          gap: 10,
+          maxHeight: isMobile ? 360 : 480,
+          overflowY: 'auto',
+          paddingRight: 6
+        }}
+      >
+        {data.map((row: any) => {
+          const val = Number(row?.[valueKey] || 0);
+          const widthPct = `${(val / maxValue) * 100}%`;
+
+          return (
+            <div key={row.id} className="chart-row" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {/* Rótulo do Integrante */}
+              <div
+                className="chart-row-label"
+                title={`${row.apelido} (${row.nome})`}
+                style={{
+                  width: isMobile ? 90 : 160,
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: theme.textLight,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}
+              >
+                @{row.apelido}
+              </div>
+
+              {/* Barra */}
+              <div className="chart-row-bar" style={{ flex: 1, background: '#f1f5f9', borderRadius: 10, height: 20, position: 'relative' }}>
+                {/* largura proporcional */}
+                <div
+                  style={{
+                    width: widthPct,
+                    height: '100%',
+                    borderRadius: 10,
+                    background: color,
+                    transition: 'width 0.25s ease'
+                  }}
+                />
+
+                {(() => {
+                  const ratio = val / maxValue;
+
+                  // Barra pequena → badge branco com número preto (fora da barra)
+                  if (ratio < 0.15) {
+                    return (
+                      <div
+                        className="chart-value"
+                        style={{
+                          position: 'absolute',
+                          right: -4,
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          color: theme.text,   // PRETO
+                          fontWeight: 900,
+                          fontSize: 11,
+                          borderRadius: 8,
+                          padding: '2px 6px',
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                        }}
+                      >
+                        {val}
+                      </div>
+                    );
+                  }
+
+                  // Barra grande → número preto dentro da barra
+                  return (
+                    <div
+                      className="chart-value"
+                      style={{
+                        position: 'absolute',
+                        right: 8,
+                        insetBlock: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        fontSize: 11,
+                        fontWeight: 900,
+                        color: theme.text   // PRETO
+                      }}
+                    >
+                      {val}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
   // ---------------------------------------------------------
   // 8. UTILITÁRIOS E FORMATAÇÃO
   // ---------------------------------------------------------
@@ -747,6 +875,7 @@ if (!user && !authLoading) return (
             </div>
           </div>
         </div>
+        
 
         <button
   onClick={async () => {
@@ -978,12 +1107,56 @@ doc.save("ranking_porcolatras_2026_completo.pdf");
   }}
   style={{ ...ui.button(theme.primary), width: isMobile ? '100%' : 'auto' }}
 >
-  Exportar
+  Exportar Ranking PDF
 </button>
+<div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+  <button
+    onClick={async () => { /* ... seu código Exportar já existente ... */ }}
+    style={{ ...ui.button(theme.primary), width: isMobile ? '100%' : 'auto' }}
+  
+    onClick={() => setShowCharts(s => !s)}
+    style={{ ...ui.button(theme.info, true), width: isMobile ? '100%' : 'auto' }}
+  >
+    {showCharts ? 'Ocultar gráficos' : 'Ver gráficos'}
+  </button>
+
+  {/* 🔹 NOVO: abrir tela dedicada de gráficos */}
+  <button
+    onClick={() => setCurrentView('graficos')}
+    style={{ ...ui.button(theme.warning, true), width: isMobile ? '100%' : 'auto' }}
+  >
+    Tela cheia (somente gráficos)
+  </button>
+</div>
+
 
 
 
       </div>
+{/* ===================== GRÁFICOS: CASA / FORA ===================== */}
+{showCharts && (
+  <div
+    style={{
+      display: 'grid',
+      gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+      gap: '20px',
+      marginBottom: '25px'
+    }}
+  >
+    <BarChart
+      title="Jogos em Casa por Integrante"
+      data={[...rankingAtual].sort((a: any, b: any) => b.casa - a.casa)}
+      valueKey="casa"
+      color={theme.primary}
+    />
+    <BarChart
+      title="Jogos Fora por Integrante"
+      data={[...rankingAtual].sort((a: any, b: any) => b.fora - a.fora)}
+      valueKey="fora"
+      color={theme.warning}
+    />
+  </div>
+)}
 
       {/* PODIUM TOP 3 */}
       <div
@@ -1696,7 +1869,7 @@ doc.save("ranking_porcolatras_2026_completo.pdf");
     <h2 style={{ fontSize: '32px', fontWeight: '900', marginBottom: '25px' }}>
       Presença por Usuário
     </h2>
-
+    
     {/* ================= LISTA DE USUÁRIOS ================= */}
     {!usuarioSelecionado && (
       <>
@@ -1891,6 +2064,65 @@ doc.save("ranking_porcolatras_2026_completo.pdf");
           })}
       </>
     )}
+  </div>
+)}
+{/* ✅ VIEW: GRÁFICOS EM TELA CHEIA (SOMENTE GRÁFICOS) */}
+{currentView === 'graficos' && (
+  <div
+    id="print-charts"
+    className="animate-fade-in"
+    style={{
+      minHeight: 'calc(100vh - 80px)',
+      padding: isMobile ? '10px' : '20px',
+      background: '#ffffff'
+    }}
+  >
+    {/* Ações (VISÍVEL NA TELA, OCULTO NA IMPRESSÃO) */}
+    <div className="hide-on-print" style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <button onClick={() => setCurrentView('dashboard')} style={{ ...ui.button(theme.primary, true) }}>← Voltar ao Ranking</button>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button onClick={() => window.print()} style={{ ...ui.button(theme.primary) }} title="Imprimir ou salvar como PDF apenas os gráficos">🖨️ Exportar (PDF/Imprimir)</button>
+      </div>
+    </div>
+
+    {/* Cabeçalho do relatório (APARECE NA IMPRESSÃO) */}
+    <div style={{ marginBottom: 16 }}>
+      <h2 style={{ margin: 0, fontWeight: 900, color: theme.primaryDark }}>Gráficos de Presença — Temporada 2026</h2>
+      <div className="chart-meta">Gerado em {new Date().toLocaleString('pt-BR')}</div>
+    </div>
+
+    {/* Área dos gráficos — vira 2 colunas na impressão */}
+    <div
+      className="no-print-shadow print-grid"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+        gap: 20,
+        alignItems: 'start'
+      }}
+    >
+      <BarChart
+        title="Jogos em Casa por Integrante"
+        data={[...rankingAtual].sort((a: any, b: any) => b.casa - a.casa)}
+        valueKey="casa"
+        color={theme.primary}
+      />
+      <BarChart
+        title="Jogos Fora por Integrante"
+        data={[...rankingAtual].sort((a: any, b: any) => b.fora - a.fora)}
+        valueKey="fora"
+        color={theme.warning}
+      />
+
+      <div style={{ gridColumn: isMobile ? 'auto' : '1 / span 2' }}>
+        <BarChart
+          title="Total de Jogos por Integrante"
+          data={[...rankingAtual].sort((a: any, b: any) => b.total - a.total)}
+          valueKey="total"
+          color={theme.info}
+        />
+      </div>
+    </div>
   </div>
 )}
 
