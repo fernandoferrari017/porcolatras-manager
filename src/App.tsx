@@ -572,6 +572,14 @@ async function exportarGraficosPDF_UnicaPagina() {
     return date.toLocaleDateString('pt-BR', { weekday: 'short' }).toUpperCase();
   };
 
+  // Comparador oficial do ranking geral (total desc, fora desc, casa desc, apelido asc)
+const compareRanking = (a: any, b: any) => {
+  if (b.total !== a.total) return b.total - a.total;
+  if (b.fora !== a.fora) return b.fora - a.fora;     // ✅ desempate: mais jogos fora
+  if (b.casa !== a.casa) return b.casa - a.casa;     // opcional: estabilidade
+  return String(a.apelido || '').localeCompare(String(b.apelido || ''), 'pt-BR', { sensitivity: 'base' });
+};
+
   // ---------------------------------------------------------
   // 9. LÓGICA DE NEGÓCIO: CARREGAMENTO E PROCESSAMENTO
   // ---------------------------------------------------------
@@ -628,7 +636,7 @@ async function exportarGraficosPDF_UnicaPagina() {
 
       // Converte mapa para array e ordena
       const finalRanking = Object.values(statsMap);
-      setRankingAtual([...finalRanking].sort((a: any, b: any) => b.total - a.total));
+      setRankingAtual([...finalRanking].sort(compareRanking));      
       setRankingCasa([...finalRanking].sort((a: any, b: any) => b.casa - a.casa));
       setRankingFora([...finalRanking].sort((a: any, b: any) => b.fora - a.fora));
 
@@ -1133,9 +1141,8 @@ if (!user && !authLoading) return (
       if (jogo.tipo_local === 'Fora') statsMap[p.usuario_id].fora += 1;
     });
     
-    const rankingAtual = Object.values(statsMap).sort(
-      (a: any, b: any) => b.total - a.total
-    );
+    const rankingAtual = Object.values(statsMap).sort(compareRanking as any);
+
     
     const doc = new jsPDF();
 
