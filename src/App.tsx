@@ -15,7 +15,6 @@ import {
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-
 /** 👇 AGORA SIM */
 const APP_VERSION = "2026.01.21";
 
@@ -342,7 +341,224 @@ const BarChart = ({
     </div>
   );
 };
-  // ---------------------------------------------------------
+// Carrega Chart.js + Datalabels somente uma vez, com fallback seguro
+let __chartSingleton: any = null;
+
+async function loadChartOnce() {
+  if (__chartSingleton) return __chartSingleton;
+
+  const [{ default: Chart }, pluginMod] = await Promise.all([
+    import('chart.js/auto'),
+    // se o plugin não estiver presente, seguimos sem datalabels
+    import('chartjs-plugin-datalabels').catch(() => ({ default: null })),
+  ]);
+
+  // Registra o plugin apenas uma vez
+  if (pluginMod?.default && !(Chart as any).__datalabels_registered) {
+    Chart.register(pluginMod.default);
+    (Chart as any).__datalabels_registered = true;
+  }
+
+  __chartSingleton = Chart;
+  return Chart;
+}
+async function gerarGraficoImagem(
+  titulo: string,
+  pares: { label: string; valor: number }[],
+  cor: string,
+  opts?: {
+    topN?: number;
+    maxCharsPerLine?: number;
+    maxAxisChars?: number;
+    fontSize?: number;
+    barThickness?: number;
+    lineHeightPx?: number;
+  }
+) {
+  const {
+    topN = 0,
+    maxCharsPerLine = 10,
+    maxAxisChars = 16,
+    fontSize = 13,
+    barThickness = 12,
+    lineHeightPx = 22,
+  } = opts || {};
+
+  try {
+    // 1) Ordena / TopN
+    let ordenado = [...pares].sort((a, b) => b.valor - a.valor);
+    if (topN > 0 && ordenado.length > topN) {
+      const top = ordenado.slice(0, topN);
+      const resto = ordenado.slice(topN);
+      const somaResto = resto.reduce((acc, cur) => acc + (cur.valor || 0), 0);
+      ordenado = [...top, { label: 'Outros', valor: somaResto }];
+    }
+
+    // 2) Helpers
+    const splitEveryN = (s: string, n: number) => {
+      const chunks: string[] = [];
+      for (let i = 0; i < s.length; i += n) chunks.push(s.slice(i, i + n));
+      return chunks;
+    };
+    const toAxis = (full: string) => {
+      const multi = splitEveryN(full, Math.max(4, maxCharsPerLine)).join('\n');
+      return multi.length > maxAxisChars + 1 ? multi.slice(0, maxAxisChars) + '…' : multi;
+    };
+
+    // 3) Canvas (mais nítido)
+    const linhas = ordenado.length;
+    const altura = Math.min(Math.max(420, lineHeightPx * linhas + 110), 1600);
+    const canvas = document.createElement('canvas');
+    canvas.width = 2000;
+    canvas.height = altura;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D context não disponível.');
+
+    // 4) Carrega Chart.js (+ plugin já registrado se existente)
+    const Chart = await loadChartOnce();
+
+    // threshold para decidir rótulo dentro/fora
+    const THRESHOLD_INSIDE = 0.18;
+
+    // 5) Cria o gráfico
+    const chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ordenado.map(p => p.label),
+        datasets: [{
+          label: titulo,
+          data: ordenado.map(p => p.valor),
+          backgroundColor: cor,
+          borderWidth: 0,
+          barThickness,
+          maxBarThickness: barThickness,
+          minBarLength: 2,
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: false,
+        maintainAspectRatio: false,
+        animation: false,
+        layout: { padding: 16 },
+        scales: {
+          x: {
+            beginAtZero: true,
+            ticks: { font: { size: fontSize } },
+            grid: { color: '#e2e8f0' }
+          },
+          y: {
+            ticks: {
+              autoSkip: false,
+              font: { size: fontSize },
+              callback: (_value: any, idx: number) => toAxis(ordenado[idx]?.label || '')
+            },
+            grid: { display: false }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          title: {
+            display: true,
+            text: titulo,
+            color: '#0f172a',
+            font: { size: fontSize + 6, weight: 'bold' }
+          },
+          tooltip: {
+            enabled: true,
+            callbacks: {
+              title: (items) => {
+                const idx = items?.[0]?.dataIndex ?? 0;
+                return ordenado[idx]?.label || '';
+              },
+              label: (item) => `${item.dataset.label}: ${item.raw}`
+            }
+          },
+          // Datalabels só existirá se o plugin foi carregado no loader
+          datalabels: (Chart as any).__datalabels_registered ? {
+            formatter: (value: number) => `${value}`,
+            color: (ctx: any) => {
+              const data = ctx.dataset.data as number[];
+              const max = Math.max(...data, 1);
+              const v = Number(ctx.formattedValue);
+              return (v / max) >= THRESHOLD_INSIDE ? '#ffffff' : '#0f172a';
+            },
+            font: { weight: 'bold', size: Math.max(11, fontSize - 1) },
+            clamp: true,
+            clip: false,
+            anchor: 'end',
+            align: (ctx: any) => {
+              const data = ctx.dataset.data as number[];
+              const max = Math.max(...data, 1);
+              const v = Number(ctx.formattedValue);
+              return (v / max) >= THRESHOLD_INSIDE ? 'right' : 'left';
+            },
+            offset: (ctx: any) => {
+              const data = ctx.dataset.data as number[];
+              const max = Math.max(...data, 1);
+              const v = Number(ctx.formattedValue);
+              return (v / max) >= THRESHOLD_INSIDE ? 4 : 6;
+            }
+          } : undefined
+        }
+      }
+    });
+
+    // Garante desenho final antes de exportar
+    await new Promise(r => setTimeout(r, 0));
+    const dataUrl = canvas.toDataURL('image/png', 1.0);
+    chart.destroy();
+    return dataUrl;
+  } catch (err) {
+    console.error('[Export PDF] gerarGraficoImagem falhou:', err);
+    throw err; // propaga para o catch externo
+  }
+}
+async function exportarGraficosPDF_UnicaPagina() {
+  try {
+    setActionLoading?.(true); // opcional: mostra seu banner "Sincronizando dados..."
+
+    // Pares {label, valor} (TODOS os membros)
+    const paresCasa  = rankingAtual.map((u: any) => ({ label: u.apelido, valor: Number(u.casa  || 0) }));
+    const paresFora  = rankingAtual.map((u: any) => ({ label: u.apelido, valor: Number(u.fora  || 0) }));
+    const paresTotal = rankingAtual.map((u: any) => ({ label: u.apelido, valor: Number(u.total || 0) }));
+
+    // Preset compacto (sem TopN)
+    const optsTodos = {
+      topN: 0,
+      maxCharsPerLine: 9,
+      maxAxisChars: 14,
+      fontSize: 12,
+      barThickness: 10,
+      lineHeightPx: 20
+    };
+
+    // Gera imagens em paralelo
+    const [imgCasa, imgFora, imgTotal] = await Promise.all([
+      gerarGraficoImagem('Jogos em Casa',  paresCasa,  theme.primary, optsTodos),
+      gerarGraficoImagem('Jogos Fora',     paresFora,  theme.warning, optsTodos),
+      gerarGraficoImagem('Total de Jogos', paresTotal, theme.info,    optsTodos),
+    ]);
+
+    // Monta PDF
+    const doc = new jsPDF('landscape', 'mm', 'a4');
+    doc.setFontSize(18);
+    doc.text('RELATÓRIO DE PRESENÇA — PORCOLATRAS 2026', 10, 12);
+
+    // Layout (reduzido para caber tudo)
+    const wHalf = 135, hTop = 75, wFull = 277, hFull = 85;
+    doc.addImage(imgCasa, 'PNG', 10,  16, wHalf, hTop);
+    doc.addImage(imgFora, 'PNG', 152, 16, wHalf, hTop);
+    doc.addImage(imgTotal, 'PNG', 10, 95, wFull, hFull);
+
+    doc.save('graficos_porcolatras_1_pagina.pdf');
+  } catch (err: any) {
+    console.error('[Export PDF] Falha ao exportar:', err);
+    alert('Falha ao exportar o PDF. Verifique o console para detalhes.\nDica: confirme se "chartjs-plugin-datalabels" está instalado.');
+  } finally {
+    setActionLoading?.(false);
+  }
+}  // ---------------------------------------------------------
   // 8. UTILITÁRIOS E FORMATAÇÃO
   // ---------------------------------------------------------
   const formatDate = (dateString: string) => {
@@ -1111,16 +1327,12 @@ doc.save("ranking_porcolatras_2026_completo.pdf");
 </button>
 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
   <button
-    onClick={async () => { /* ... seu código Exportar já existente ... */ }}
-    style={{ ...ui.button(theme.primary), width: isMobile ? '100%' : 'auto' }}
-  
     onClick={() => setShowCharts(s => !s)}
     style={{ ...ui.button(theme.info, true), width: isMobile ? '100%' : 'auto' }}
   >
     {showCharts ? 'Ocultar gráficos' : 'Ver gráficos'}
   </button>
 
-  {/* 🔹 NOVO: abrir tela dedicada de gráficos */}
   <button
     onClick={() => setCurrentView('graficos')}
     style={{ ...ui.button(theme.warning, true), width: isMobile ? '100%' : 'auto' }}
@@ -1128,7 +1340,6 @@ doc.save("ranking_porcolatras_2026_completo.pdf");
     Tela cheia (somente gráficos)
   </button>
 </div>
-
 
 
 
@@ -2078,20 +2289,43 @@ doc.save("ranking_porcolatras_2026_completo.pdf");
     }}
   >
     {/* Ações (VISÍVEL NA TELA, OCULTO NA IMPRESSÃO) */}
-    <div className="hide-on-print" style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-      <button onClick={() => setCurrentView('dashboard')} style={{ ...ui.button(theme.primary, true) }}>← Voltar ao Ranking</button>
-      <div style={{ display: 'flex', gap: 10 }}>
-        <button onClick={() => window.print()} style={{ ...ui.button(theme.primary) }} title="Imprimir ou salvar como PDF apenas os gráficos">🖨️ Exportar (PDF/Imprimir)</button>
-      </div>
+    <div className="hide-on-print" 
+      style={{ 
+        display: 'flex', 
+        gap: 10, 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: 16 
+      }}
+    >
+      {/* Voltar */}
+      <button 
+        onClick={() => setCurrentView('dashboard')} 
+        style={{ ...ui.button(theme.primary, true) }}
+      >
+        ← Voltar ao Ranking
+      </button>
+
+      {/* 🔄 Aqui substituímos o botão antigo pelo seu novo botão */}
+      <button
+        onClick={exportarGraficosPDF_UnicaPagina}
+        style={{ ...ui.button(theme.secondary) }}
+      >
+        📊 Exportar 3 Gráficos (PDF – 1 página)
+      </button>
     </div>
 
     {/* Cabeçalho do relatório (APARECE NA IMPRESSÃO) */}
     <div style={{ marginBottom: 16 }}>
-      <h2 style={{ margin: 0, fontWeight: 900, color: theme.primaryDark }}>Gráficos de Presença — Temporada 2026</h2>
-      <div className="chart-meta">Gerado em {new Date().toLocaleString('pt-BR')}</div>
+      <h2 style={{ margin: 0, fontWeight: 900, color: theme.primaryDark }}>
+        Gráficos de Presença — Temporada 2026
+      </h2>
+      <div className="chart-meta">
+        Gerado em {new Date().toLocaleString('pt-BR')}
+      </div>
     </div>
 
-    {/* Área dos gráficos — vira 2 colunas na impressão */}
+    {/* Área dos gráficos */}
     <div
       className="no-print-shadow print-grid"
       style={{
@@ -2103,13 +2337,14 @@ doc.save("ranking_porcolatras_2026_completo.pdf");
     >
       <BarChart
         title="Jogos em Casa por Integrante"
-        data={[...rankingAtual].sort((a: any, b: any) => b.casa - a.casa)}
+        data={[...rankingAtual].sort((a, b) => b.casa - a.casa)}
         valueKey="casa"
         color={theme.primary}
       />
+
       <BarChart
         title="Jogos Fora por Integrante"
-        data={[...rankingAtual].sort((a: any, b: any) => b.fora - a.fora)}
+        data={[...rankingAtual].sort((a, b) => b.fora - a.fora)}
         valueKey="fora"
         color={theme.warning}
       />
@@ -2117,7 +2352,7 @@ doc.save("ranking_porcolatras_2026_completo.pdf");
       <div style={{ gridColumn: isMobile ? 'auto' : '1 / span 2' }}>
         <BarChart
           title="Total de Jogos por Integrante"
-          data={[...rankingAtual].sort((a: any, b: any) => b.total - a.total)}
+          data={[...rankingAtual].sort((a, b) => b.total - a.total)}
           valueKey="total"
           color={theme.info}
         />
@@ -2125,7 +2360,6 @@ doc.save("ranking_porcolatras_2026_completo.pdf");
     </div>
   </div>
 )}
-
       </main>
 
 {/* MODAL: USUÁRIO (CREATE/EDIT) */}
